@@ -4,7 +4,8 @@ import re
 from tqdm import tqdm
 
 ## Local Imports
-from session import SESSION, make_soup
+from session import SESSION
+from util import make_soup
 
 class FilmSearch():
     """ Search for all the films (unless a page limit is specificed) for
@@ -82,20 +83,20 @@ class FilmSearch():
         self.country = country
         self.language = language
 
-    def __str__(self):
-        return f'''\
-        == FilmSearch ==\
-        \nGenre:\
-        \nYear:\
-        \nDecade:\
-        \nCountry:\
-        \nLanguage\
-        \nSort by:\
-        '''
-
     def __repr__(self):
         cls_name = self.__class__.__name__
         return f'{cls_name} ({self})'
+
+    def __str__(self):
+        return f'''\
+        == FilmSearch ==\
+        \n\tGenre: {self.genre}\
+        \n\tYear: {self.year}\
+        \n\tDecade: {self.decade}\
+        \n\tCountry: {self.country}\
+        \n\tLanguage: {self.language}\
+        \n\tSort by: {self.sort_by}\
+        '''
 
     def __call__(self, info=False, start_page=1, page_limit=None):
         """ Return film data as a list of dicts, each dict containing 'id' and 'link'
@@ -105,7 +106,8 @@ class FilmSearch():
         film_data = []
 
         # Identify stopping point for while loop
-        stop_page = start_page + (page_limit-1) if page_limit else self.num_pages
+        num_pages = self.num_pages
+        stop_page = min(start_page + (page_limit-1), num_pages) if page_limit else num_pages
 
         def scrape_page(page_num):
             request = SESSION.request("GET", f"{suburl}page/{page_num}/")
@@ -113,7 +115,8 @@ class FilmSearch():
             return self.get_page_of_film_ids(soup) if not info else self.get_page_of_film_info(soup)
         
         ## Commence scraping
-        print(f'{self}\n\n**Searching now...**')
+        # print(f'{self}\n\n**Searching now...**')
+        
         [film_data.extend(scrape_page(i)) for i in tqdm(range(start_page, stop_page+1))]            
 
         return film_data

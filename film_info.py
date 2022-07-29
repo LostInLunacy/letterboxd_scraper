@@ -6,7 +6,8 @@
 import re
 
 ## Local Imports
-from session import SESSION, make_soup
+from session import SESSION
+from util import make_soup
 
 ## Global vars
 BAD_MOVIE = 1.75 # OR LESS
@@ -28,7 +29,7 @@ class FilmInfo():
         pattern = r"(/film/)?([-\w\s:]+)/?"
 
         try:
-            self.path = re.findall(pattern, film_path)[0][1].replace(' ', '-').replace('--', '-')
+            self.path = re.findall(pattern, film_path.lower())[0][1].replace(' ', '-').replace('--', '-')
         except:
             raise IndexError("Could not extract film path from string:", film_path)
 
@@ -310,6 +311,18 @@ class FilmInfo():
         return float(re.findall(pattern, title)[0])
 
     @property
+    def letterboxd_rating_fallback(self):
+        """ Returns the Letterboxd rating, if there is one.
+        ELSE returns its true average rating for films w/ <30 ratings.
+        """
+        if self.num_ratings < 30:
+            return self.true_avg_rating
+
+        pattern = r"Weighted average of ([\d\.]+) based on"
+        title = self.rating_soup.find('a', attrs={'title': re.compile(pattern)}).get('title')
+        return float(re.findall(pattern, title)[0])
+
+    @property
     def true_avg_rating(self):
         """ Computes the mean of the ratings collected in self.ratings.
         r-type: float """
@@ -332,8 +345,9 @@ class FilmInfo():
 
 if __name__ == '__main__':
     ''' Testing '''
+    pass
 
-    for film in ['pocong mandi goyang pinggul', 'hip hop locos']:
-        test = FilmInfo(film)
-        print(test.path)
-        print(f"{test.name}: {test.letterboxd_rating} vs {test.true_avg_rating}")
+    # for film in ['pocong mandi goyang pinggul', 'hip hop locos']:
+    #     test = FilmInfo(film)
+    #     print(test.path)
+    #     print(f"{test.name}: {test.letterboxd_rating} vs {test.true_avg_rating}")
