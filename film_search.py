@@ -2,10 +2,12 @@
 ## Imports
 import re
 from tqdm import tqdm
+from film_info import FilmInfo
 
 ## Local Imports
 from session import SESSION
 from util import make_soup
+from math import ceil
 
 class FilmSearch():
     """ Search for all the films (unless a page limit is specificed) for
@@ -24,10 +26,11 @@ class FilmSearch():
         - by/rating-lowest
         - by/shortest
         - by/longest
-        - popular
-        - popular/this/year
-        - popular/this/month
-        - popular/this/week
+        - popular | /with/friends
+        - popular/this/year | /with/friends
+        - popular/this/month | /with/friends
+        - popular/this/week | /with/friends
+        - 
 
         Genre (str)
         - Must be in SESSION.genre_list
@@ -98,16 +101,30 @@ class FilmSearch():
         \n\tSort by: {self.sort_by}\
         '''
 
-    def __call__(self, info=False, start_page=1, page_limit=None):
+    def merge(self, other):
+        entries = self()
+        oth_ent = other()
+        return [i for i in entries if i in oth_ent]
+
+    def __call__(self, info=False, start_page=1, page_limit=None, percent=100):
         """ Return film data as a list of dicts, each dict containing 'id' and 'link'
         r-type: list of dicts 
         """
+        print(f"{self}\n\tStart page: {start_page}\n\tPage limit: {page_limit}\n\tPercent: {percent}")
+
         suburl = self.suburl
         film_data = []
-
-        # Identify stopping point for while loop
-        num_pages = self.num_pages
-        stop_page = min(start_page + (page_limit-1), num_pages) if page_limit else num_pages
+        
+        # The number of pages available to the program 
+        num_pages = ceil(self.num_pages * (percent/100))
+        
+        # The start_page exceeds number of pages available, so return empty list
+        if start_page > num_pages:
+            return []
+        
+        # Calculate end of range of scraping pages
+        end_page = min(start_page + page_limit, num_pages+1) if page_limit else num_pages+1     
+        # end_page = min(start_page + (page_limit-1), num_pages) if page_limit else ceil(num_pages * (percent/100))
 
         def scrape_page(page_num):
             request = SESSION.request("GET", f"{suburl}page/{page_num}/")
@@ -116,9 +133,22 @@ class FilmSearch():
         
         ## Commence scraping
         # print(f'{self}\n\n**Searching now...**')
-        
-        [film_data.extend(scrape_page(i)) for i in tqdm(range(start_page, stop_page+1))]            
 
+        while True:
+
+            if end_page <= (safe:= start_page + 25):
+                last_scrape = True
+                end = end_page
+            else:
+                end = safe
+                last_scrape = False
+
+            [film_data.extend(scrape_page(i)) for i in tqdm(range(start_page, end))]   
+
+            if last_scrape:
+                break  
+            start_page += 25
+        
         return film_data
 
     @property
@@ -158,8 +188,11 @@ class FilmSearch():
         request = SESSION.request("GET", self.suburl)
         soup = make_soup(request)
 
-        h2_text = soup.find('h2', class_='ui-block-heading').text
-        num_films = int(re.findall(r"([\d,]+)", h2_text)[0].replace(',', ''))
+        p_text = soup.find('p', class_='ui-block-heading').text
+        if 'There are no' in p_text:
+            return 0
+
+        num_films = int(re.findall(r"([\d,]+)", p_text)[0].replace(',', ''))
         num_pages = num_films//72+1
         return num_pages
 
@@ -169,7 +202,7 @@ class FilmSearch():
         r-type: list of dicts """
         
         divs = [i.find('div') for i in soup.find_all('li', class_=['listitem', 'poster-container'])]
-        films = [ {'filmId': int(i.get('data-film-id'))} for i in divs ] 
+        films = [ int(i.get('data-film-id')) for i in divs ] 
         return films
 
     @staticmethod
@@ -201,6 +234,10 @@ if __name__ == "__main__":
 
     pass
     
-    # F = FilmSearch(genre="horror", year=2021, country="brazil")
-    # films = F(start_page=1, page_limit=3)
+    F = FilmSearch(year=2021)
+    x = F(start_page=273, page_limit=1, info=True)
+    
+    [print(f['link']) for f in x[0:15]]
+
+    # films = F(start_page=3, page_limit=1)
     # print(films)

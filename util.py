@@ -32,6 +32,21 @@ def load_json_data(file_name):
         return False
     return content
 
+def key_max(d, max_num=1, only_max=False):
+    assert len(d) >= max_num
+    if max_num == 1: 
+        m = max(zip(d.values(), d.keys()))[1]
+    else:
+        n = 1
+        while n <= max_num:
+            m = max(zip(d.values(), d.keys()))[1]
+            d.pop(m)
+            n += 1
+    if only_max and list(d.values()).count(d[m]) > only_max:
+        return False
+    return m
+
+
 def list_of_unique_dicts(x):
     """ 
     Removes duplicate values from a list of dicts.
@@ -83,6 +98,12 @@ def format_name(name):
         formatted_name = formatted_name.replace('--', '-')
 
     return formatted_name
+
+def limit_list(l, limit):
+    return l if len(l) <= limit else l[0:limit]
+
+noneify = lambda x: x if x is not None else ''
+noneify_func = lambda x, func, *args, **kwargs: func(x, *args, **kwargs) if x else ''
 
 ROOT = get_git_root(get_current_file())
 

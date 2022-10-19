@@ -32,8 +32,7 @@ class LetterboxdSession(requests.Session):
         self.headers.update(USER_AGENT)
 
         ## Set CSRF token
-        token = self.__get_token()
-        self.cookie_params = {'__csrf': token}
+        self.update_token()
 
         ## Login details
         self.logged_in = False
@@ -43,12 +42,16 @@ class LetterboxdSession(requests.Session):
         self.__search_options = make_soup(self.request("GET", f"films/by/rating"))
         self.__search_options_user = make_soup(self.request("GET", f"{self.username}/films"))
 
-        self.year_range = (1860, pendulum.now()._start_of_decade().year+10)
+        self.year_range = (1870, pendulum.now()._start_of_decade().year+9)
         self.genre_list = self.__get_genre_list()
         self.service_list = self.__get_service_list()
         self.sortby_list = self.__get_sortby_list()
         self.region_dict, self.language_dict = self.__get_country_language_dict()
         self.filters_dict = self.__get_filters_dict()
+
+    @property
+    def cookie_params(self):
+        return {'__csrf': self.token}
 
     def __str__(self):
         return f"Session (Logged in == {self.logged_in})"
@@ -93,6 +96,13 @@ class LetterboxdSession(requests.Session):
         Customise request to default to main Letterboxd url.
         And to include the __CSRF token if it's a POST request. 
         """
+
+        # Refresh token - maybe this will fix errors after ~1hour? #TODO
+        minutes_to_token_refresh = 45
+        if pendulum.now().diff(self.last_token_update).in_minutes() > minutes_to_token_refresh:
+            print("Updating token")
+            self.update_token()
+
         if method == "POST":
 
             # No data passed. Create default data
@@ -121,13 +131,13 @@ class LetterboxdSession(requests.Session):
         return response
 
     ## --- Token ---
-
-    def __get_token(self):
+    def update_token(self):
         """ Get the __csrf token and pass its value to an instance variable.
         Called by __init__. """
-        self.request("GET")
+        self.last_token_update = pendulum.now()
+        self.request("GET", "film/black-swan/")
         token = self.cookies['com.xk72.webparts.csrf']
-        return token
+        self.token = token
 
     ## --- User Details ---
 
@@ -179,13 +189,15 @@ class LetterboxdSession(requests.Session):
         else:
             raise LoginException(error)
 
+    def logout(self):
+        self.request('POST', '/user/login.do', data=self.login_details)
+
     def __call__(self):
         """ Login to Letterboxd if not already. """
 
         # Already logged in - __call__ func not needed
         if self.logged_in:
-            print("Already logged in")
-            return
+            self.logout
             
         self.__login()
 
@@ -203,7 +215,7 @@ class LetterboxdSession(requests.Session):
 
     def __get_sortby_list(self):
         """ Returns a list of sort_by options on Letterboxd """
-        pattern = r"films\/([a-z\/-]+)\/size\/small"
+        pattern = r"films\/([a-z\/-]+)"
         return [re.findall(pattern, i.get('href'))[0] for i in self.__search_options.find_all('section', class_='smenu-wrapper')[1].find_all('a')]
 
     def __get_country_language_dict(self):
@@ -269,3 +281,33 @@ SESSION()
 
 if __name__ == '__main__':
     pass
+    # print(SESSION.cookies)
+    # print()
+    # print(SESSION.token)
+    # print()
+
+    # # SESSION.update_token()
+    # # print(SESSION.cookies)
+    # # print()
+    # # print(SESSION.token)
+
+    # # SESSION()
+    # # SESSION.update_token()
+
+    # # print(SESSION.cookies)
+    # # print()
+    # # print(SESSION.token)
+
+    # print(SESSION2.cookies)
+    # print()
+    # print(SESSION2.token)
+    # print()
+
+    # request = SESSION.request("GET", 'film/jan-nowak-jezioranski-courier-from-warsaw')
+    # print(request.cookies)
+    # print(SESSION.token)
+    # SESSION.update_token()
+    # print(request.cookies)
+    # print(SESSION.token)
+
+

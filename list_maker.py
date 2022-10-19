@@ -233,7 +233,7 @@ class LetterboxdList():
         ## Set self.soup to soup of view_url of list
         self.soup = make_soup(SESSION.request("GET", self.view_url, cookies=requests_jar))
 
-    def get_id_name_link_dict(self):
+    def get_id_name_link_dict(self, page=None):
         """ 
         Returns each id in the film list together with the corresponding film_name and link
         Retains list order
@@ -268,6 +268,9 @@ class LetterboxdList():
         response = SESSION.request("GET", self.view_url)
         soup = make_soup(response)
 
+        if page:
+            return get_page_of_film_names(page)
+
         if not ( page_navigator := soup.find('div', class_='pagination') ):
             last_page = 1
         else:
@@ -296,6 +299,10 @@ class LetterboxdList():
     @property
     def view_url(self):
         return f"{self.username}/list/{self.formatted_name}/"
+
+    @property
+    def url(self):
+        return f"{SESSION.MAIN_URL}{self.view_url}"
 
     @property
     def data(self):
@@ -382,6 +389,12 @@ class LetterboxdList():
             return full_description
 
     @property
+    def num_entries(self):
+        """ Returns the number of entires in the list. """
+        progress_panel = self.soup.find_all('section', class_='progress-panel')[0]
+        return int(progress_panel.get('data-total', 0))
+
+    @property
     def entries(self):
         """ Returns the list's entries
         NOTE: this also includes any notes that have been added for each film. 
@@ -389,10 +402,24 @@ class LetterboxdList():
         Example:
         [290472, 531904] """
 
-        entry_list_items = self.soup.find('ul', class_='poster-list').find_all('div')
+        def get_entries_from_page(soup):
+            entry_list_items = soup.find('ul', class_='poster-list').find_all('div')
+            # Convert list to entries dict
+            return [int(i.get('data-film-id')) for i in entry_list_items]
 
-        # Convert list to entries dict
-        return [int(i.get('data-film-id')) for i in entry_list_items]
+        if self.num_entries <= 100:
+            return get_entries_from_page(self.soup)
+
+        i = 1
+        entries = []
+        while len(entries) < self.num_entries:
+            request = SESSION.request('GET', f"{self.view_url}/page/{i}/")
+            soup = make_soup(request)
+            entries_on_page = get_entries_from_page(soup)
+            entries.extend(entries_on_page)
+            i += 1
+        
+        return entries        
 
     @property
     def entries_links(self):
@@ -431,6 +458,7 @@ class MyList(LetterboxdList):
         but pass the username as the session's username. """
         super().__init__(name, username=SESSION.username)
         self.separator = separator
+        self.remove_duplicates()
 
     def __repr__(self):
         cls_name = self.__class__.__name__
@@ -449,6 +477,15 @@ class MyList(LetterboxdList):
 
     def load(self):
         self.soup = make_soup(SESSION.request('GET', self.edit_url))
+
+    def remove_duplicates(self):
+        """ Occasionally duplicates will randomly appear in list. So remove upon __init__"""
+        entries = self.entries
+        if len(entries) == len(n:= set(entries)):
+            # No duplicates to remove
+            return
+        replacement_entries = format_entries(n)
+        self.replace(replacement_entries)        
 
     def delete(self):
         """ XXX Deletes XXX the list from Letterboxd. This cannot be undone!
@@ -554,21 +591,24 @@ class MyList(LetterboxdList):
     def description(self):
         description = self.soup.find('textarea', attrs={'name': 'notes'}).text
         return '' if not description else description
-
+       
     @property
     def entries_notes(self):
-        def get_film_data(soup):
+        def get_film_data(soup_part):
             """ Returns the data for an individual film in the entries.
             This consists the film_id
             And, if one exists, the review (notes), and if the review (notes) contain spoilers
             
             r-type: dict
             """
-            film_id = int(soup.get('data-film-id'))
-            notes = soup.find('input', attrs={'name': 'review', 'value': True}).get('value')
+            film_id = int(soup_part.get('data-film-id')) 
+            # BUG with update ~2022/10/19, letterboxd changed their film-ids from numbers to letterboxd combinations
+            # This breaks this code and the entire program due my frequently converting back and forth to ints and strings
+
+            notes = soup_part.find('input', attrs={'name': 'review', 'value': True}).get('value')
             if not notes:
                 return {'filmId': film_id}
-            contains_spoilers = bool(soup.find('input', attrs={'name': 'containsSpoilers', 'value': 'true'}))
+            contains_spoilers = bool(soup_part.find('input', attrs={'name': 'containsSpoilers', 'value': 'true'}))
             return {'filmId': film_id, 'review': notes, 'containsSpoilers': contains_spoilers}
 
         list_items = self.soup.find_all('li', class_='film-list-entry')
@@ -645,6 +685,7 @@ class MyList(LetterboxdList):
         """ 
         A -> []
         Clears all entries in a list. """
+        self.public = False
         self.update(entries=[])
 
     def replace(self, *args, show_changes=False):
@@ -652,8 +693,15 @@ class MyList(LetterboxdList):
         A, B -> B        
         Replace any existing entries with the passed list(s) of entries. """
         merged_entries = self.__merge_entries(*args)
-        merged_formatted = format_entries(merged_entries)
-        self.update(entries=merged_formatted, show_changes=show_changes)
+        if not merged_entries: 
+            return False
+        
+        if not isinstance(merged_entries[0], dict):
+            # Then assume to be in format [14515, 15643, ...]
+            # So change to [{'filmId': 14515}, {'filmId': 15643}, ...]
+            merged_entries = format_entries(merged_entries)
+
+        self.update(entries=merged_entries, show_changes=show_changes)
 
     def append(self, *args, show_changes=False):
         """ 
@@ -665,6 +713,7 @@ class MyList(LetterboxdList):
         entries_notes = self.entries_notes
         # Add new entries to current
         [entries_notes.append({'filmId': i}) for i in merged_entries if i not in self.entries]
+        
         # Finally, update
         self.update(entries=entries_notes, show_changes=show_changes)
 
@@ -690,6 +739,11 @@ class MyList(LetterboxdList):
 
     @public.setter
     def public(self, value):
+
+        if not self.entries:
+            print("Cannot make empty list public")
+            return False
+
         assert isinstance(value, bool)
         if value is self.public: 
             print(f"List was already {self.public}")
@@ -750,12 +804,12 @@ class MyList(LetterboxdList):
         newly_added = ''
         if added_ids:
             newly_added += f"{bolden('Last Added')}:"
-            newly_added += ''.join([f"\n<a href=\"{SESSION.MAIN_URL}/film/{i['link']}/\">{i['name']}</a>" for i in added_films.values()])
+            newly_added += ''.join([f"\n<a href=\"{SESSION.MAIN_URL}/film/{i['link']}/\">{i['name']}</a>" for i in util.limit_list(list(added_films.values()),25)])
             newly_added += "\n\n"
 
         if removed_ids:
             newly_added += f"{bolden('Last Removed')}:"
-            newly_added += ''.join([f"\n<a href=\"{SESSION.MAIN_URL}/film/{i['link']}/\">{i['name']}</a>" for i in removed_films.values()])
+            newly_added += ''.join([f"\n<a href=\"{SESSION.MAIN_URL}/film/{i['link']}/\">{i['name']}</a>" for i in util.limit_list(list(removed_films.values()), 25)])
 
         newly_added = newly_added.strip()
 
@@ -942,7 +996,7 @@ class MyMasterList(MyList):
         - child_lists (type: LetterboxdList)
         - individuals (type: Individual)
         - studios (type: Studio)
-        - other_entries (type: list - entries)
+        - users (type: #TODO)
         - include (type: LetterboxdList) - these entries will always be included even if 
         - exclude (type: LetterboxdList)
         """
@@ -971,9 +1025,9 @@ class MyMasterList(MyList):
 
         self.final_entries = format_entries(list(pre_format))
         
-        import json
-        with open("../data/test.json", "w") as jf:
-            json.dump(self.final_entries, jf)
+        # import json
+        # with open("../data/test.json", "w") as jf:
+        #     json.dump(self.final_entries, jf)
 
 
     @property
@@ -1016,7 +1070,18 @@ class MyMasterList(MyList):
 
 
 if __name__ == '__main__':
-    ml = MyList('test list')
+
+    x = MyList("Animation 1960")
+
+    # x = FilmInfo('titanic-666')
+    # print(x.letterboxd_rating)
+    # print(x.true_avg_rating)
+
+    # ml = MyList('posters')
+    # print(len(ml.entries))
+
+    # pass 
+    # l = LetterboxdList('nightmare-list', 'kaseyclouds')
 
 
     
